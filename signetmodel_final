@@ -38,7 +38,7 @@ df.index = pd.to_datetime(df.index)
 #df.set_index('Dates', inplace =True)
 # Computes the data frame of returns
 df_returns=df.pct_change()
-my_stocks = ['AAPL', 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE']
+my_stocks = ['AAPL' , 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE']
 start_date = datetime.date(1980, 12, 15)
 df_returns = df_returns.loc[start_date : ]
 a = []
@@ -54,23 +54,25 @@ X = torch.tensor(np.stack(a), dtype = torch.float32)
 y = torch.tensor(np.stack(b), dtype = torch.float32)
 X_train, X_test = torch.split(X, 8000, dim = 1)
 y_train, y_test = torch.split(y, 8000, dim=1)
-
+#add leakyrelu
 
 # Making the NeuralSig model
 class SigNet(nn.Module):
     def __init__(self, in_channels, out_dimension, sig_depth):
         super(SigNet, self).__init__()
         self.augment = signatory.Augment(in_channels=in_channels,
-                                         layer_sizes=(32, 16),
+                                         layer_sizes=(64, 8),
                                          kernel_size=1,
+                                         activation = nn.LeakyReLU(),
                                          include_original=True,
                                          include_time=True)
         self.signature = signatory.Signature(depth=sig_depth, stream = True)
         # +1 because signatory.Augment is used to add time as well
-        sig_channels = signatory.signature_channels(channels=in_channels + 17,
+        sig_channels = signatory.signature_channels(channels=in_channels + 9,
                                                     depth=sig_depth)
-        self.linear = torch.nn.Linear(sig_channels,
+        self.linear = nn.Linear(sig_channels,
                                       out_dimension)
+        self.leakyrelu = nn.LeakyReLU()
 
     def forward(self, inp):
         # inp is a three dimensional tensor of shape (batch, stream, in_channels)
@@ -83,12 +85,13 @@ class SigNet(nn.Module):
         y = self.signature(x, basepoint=True)
         # y is a three dimensional tensor of shape (batch, stream, terms), corresponding to
         # the terms of the signature
-        z = self.linear(y)
+        v = self.leakyrelu(y)
+        z = self.linear(v)
         # z is a Three dimensional tensor of shape (batch, stream, out_dimension)
         return z
  
-num_epochs =  1000    #epochs
-learning_rate = 0.01 #0.001 lr
+num_epochs =  500   #change to 1000 if better fit possible 
+learning_rate = 0.001 # or 0.01 lr
 
 in_channels = 33 #number of features
 
@@ -97,14 +100,15 @@ sig_depth = 3  #depth of the signature for truncation
 out_dimension = 1 #number of output classes  
 loss_test = []  #MSEtest storing variable
 acc_test =  []  #accuracy of direction
-prec_test = []
-recall_test = []
-
+prec_test = [0, 0]
+recall_test = [0, 0]
+f1_score = [0, 0]
 
 # Training the NeuralSig model
 
 signet = SigNet(in_channels, out_dimension, sig_depth) #our NeuralSig class
-criterion = RMSELoss()    # mean-squared error for regression
+#criterion = torch.nn.MSELoss()    # mean-squared error for regression
+criterion = RMSELoss()
 optimizer = torch.optim.Adam(signet.parameters(), lr=learning_rate)
     
 for epoch in range(num_epochs):
@@ -123,7 +127,7 @@ for epoch in range(num_epochs):
 output2 = signet.forward(X_test)
 loss_test = criterion(output2, y_test)         # MSEtest values   
 y_pred = torch.flatten(output2)
-y_actual = torch.flatten(y)
+y_actual = torch.flatten(y_test)
 TP = 0
 TN = 0
 FP = 0
@@ -131,7 +135,7 @@ FN = 0
 for j, k in zip(y_pred, y_actual) :
     if (j >= 0) & (k >= 0):
         TP +=1
-    if (j < 0) & (k < 0):
+    if (j < 0) & (k < 0): 
         TN +=1
     if (j >=0) & (k < 0):
         FP +=1
@@ -143,3 +147,5 @@ prec_test[0] = TP/(TP+FP)
 prec_test[1] = TN/(TN+FN)
 recall_test[0] =  TP/(TP+FN)
 recall_test[1] = TN/(TN+FP)
+f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
+f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
