@@ -10,16 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import signatory
-from sklearn.model_selection import TimeSeriesSplit
-
-df=pd.read_csv("stocks_1980_2020.csv", index_col=0)
-# Computes the data frame of returns
-df_returns=df.pct_change()
-#choose the stock to run the model on
-stock_name='AAPL'
-df_stock=df_returns[stock_name].dropna()
-
-#Structuring the csv data for use in the model
+import datetime
 def stock_to_train_test_cl(df,k=30):
     '''
     :param df: pandas Series
@@ -29,8 +20,7 @@ def stock_to_train_test_cl(df,k=30):
     :return:
         X: training matrix
         y: target values
-    '''
-    
+    '''    
     X = np.zeros([df.shape[0] - k, k])
     y = np.zeros(df.shape[0]-k)
     for i in range(df.shape[0]-k):
@@ -38,14 +28,44 @@ def stock_to_train_test_cl(df,k=30):
         y[i] = df[i+k]
     return X, y
 
-X, y = stock_to_train_test_cl(df_stock, k=33)
-tscv = TimeSeriesSplit()             # FOr making time-series split for training and testing
+class RMSELoss(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.eps = eps
+        
+    def forward(self,yhat,y):
+        loss = torch.sqrt(self.mse(yhat,y) + self.eps)
+        return loss
+
+df=pd.read_csv("stocks_1980_2020.csv", header =0, index_col=0)
+df.index = pd.to_datetime(df.index)
+#df.set_index('Dates', inplace =True)
+# Computes the data frame of returns
+df_returns=df.pct_change()
+my_stocks = ['AAPL' ]
+start_date = datetime.date(1980, 12, 15)
+df_returns = df_returns.loc[start_date : ]
+a = []
+b = []
+
+for i in my_stocks:
+    df_stock = df_returns[i].fillna(0)
+    _X, _y = stock_to_train_test_cl(df_stock, k=33)
+    a.append(_X)
+    b.append(_y)
+    
+X = torch.tensor(np.stack(a), dtype = torch.float32)
+y = torch.tensor(np.stack(b), dtype = torch.float32)
+X_train, X_test = torch.split(X, 8000, dim = 1)
+y_train, y_test = torch.split(y, 8000, dim=1)
+
 #making our deepsig model
 class DeepSigNet(nn.Module):
     def __init__(self, in_channels, out_dimension, sig_depth):
         super(DeepSigNet, self).__init__()
         self.augment1 = signatory.Augment(in_channels=in_channels,
-                                          layer_sizes=(),
+                                          layer_sizes=(64, 8),
                                           kernel_size=1,
                                           include_original=True,
                                           include_time=True)
@@ -54,10 +74,10 @@ class DeepSigNet(nn.Module):
 
         # +1 because self.augment1 is used to add time
         
-        sig_channels1 = signatory.signature_channels(channels=in_channels + 1,
+        sig_channels1 = signatory.signature_channels(channels=in_channels + 9,
                                                      depth=sig_depth)
         self.augment2 = signatory.Augment(in_channels=sig_channels1,
-                                          layer_sizes=(8,4),
+                                          layer_sizes=(64, 8),
                                           kernel_size=1,
                                           include_original=False,
                                           include_time=False)
@@ -65,9 +85,10 @@ class DeepSigNet(nn.Module):
                                               stream=True)
 
         # 4 because that's the final layer size in self.augment2
-        sig_channels2 = signatory.signature_channels(channels=4,
+        sig_channels2 = signatory.signature_channels(channels=9,
                                                      depth=sig_depth)
         self.linear = torch.nn.Linear(sig_channels2, out_dimension)
+        self.leakyrelu = nn.LeakyReLU()
 
     def forward(self, inp):
         # inp is a three dimensional tensor of shape (batch, stream, in_channels)
@@ -85,39 +106,32 @@ class DeepSigNet(nn.Module):
         # c is a three dimensional tensor of shape (batch, stream, 4)
         d = self.signature2(c, basepoint=True)
         # d is a three dimensional tensor of shape (batch,stream, sig_channels2)
-        e = self.linear(d)
+        v = self.leakyrelu(d)
+        e = self.linear(v)
         # e is a three dimensional tensor of shape (batch,stream, out_dimension)
         return e
  
 num_epochs = 500 #1000 epochs
-learning_rate = 0.01 #0.001 lr
+learning_rate = 0.001 #0.001 lr
 
 in_channels = 33 #number of features
 sig_depth = 3  # depth for the signature transformation
 out_dimension = 1 #number of output classes  
 
-loss_test = [0]*5   #MSEtest storing variable
-i = 0
+loss_test = 0   #MSEtest storing variable
 
 
 # Training the NeuralSig model
-for train_index, test_index in tscv.split(X):
-    X_train, X_test = X[train_index], X[test_index]
-    y_train, y_test = y[train_index], y[test_index]
-    X_train_tensors_final = torch.reshape(torch.Tensor(X_train),   (1, torch.Tensor(X_train).shape[0],  torch.Tensor(X_train).shape[1]))
-    X_test_tensors_final = torch.reshape(torch.Tensor(X_test),  (1, torch.Tensor(X_test).shape[0], torch.Tensor(X_test).shape[1])) 
-    y_train_tensors_final = torch.Tensor(y_train).view(1, torch.Tensor(y_train).shape[0], 1)
-    y_test_tensors_final = torch.Tensor(y_test).view(1, torch.Tensor(y_test).shape[0], 1)
-    deepsignet = DeepSigNet(in_channels, out_dimension, sig_depth) #our DeepSig class
-    criterion = torch.nn.MSELoss()    # mean-squared error for regression
-    optimizer = torch.optim.Adam(deepsignet.parameters(), lr=learning_rate)
+deepsignet = DeepSigNet(in_channels, out_dimension, sig_depth) #our DeepSig class 
+criterion = RMSELoss()    # root mean-squared error for regression
+optimizer = torch.optim.Adam(deepsignet.parameters(), lr=learning_rate)
     
     for epoch in range(num_epochs):
-        outputs = deepsignet.forward(X_train_tensors_final) #forward pass
+        outputs = deepsignet.forward(X_train) #forward pass
         optimizer.zero_grad() #caluclate the gradient, manually setting to 0
  
   # obtain the loss function
-        loss = criterion(outputs, y_train_tensors_final)
+        loss = criterion(outputs, y_train
  
         loss.backward() #calculates the loss of the loss function
  
@@ -125,9 +139,31 @@ for train_index, test_index in tscv.split(X):
         if epoch % 100 == 0:                           # :if you wouuld like to see the loss progression 
             print("Epoch: %d, loss: %1.5f" % (epoch, loss.item()))
             
-    output2 = deepsignet.forward(X_test_tensors_final)
-    loss_test[i] = criterion(output2, y_test_tensors_final)         # MSEtest values
-    i +=1          
+output2 = deepsignet.forward(X_test)
+loss_test = criterion(output2, y_test)         # MSEtest values   
+y_pred = torch.flatten(output2)
+y_actual = torch.flatten(y_test)
+TP = 0
+TN = 0
+FP = 0
+FN = 0
+for j, k in zip(y_pred, y_actual) :
+    if (j >= 0) & (k >= 0):
+        TP +=1
+    if (j < 0) & (k < 0): 
+        TN +=1
+    if (j >=0) & (k < 0):
+        FP +=1
+    if (j < 0) & (k >=0) :
+        FN +=1
+
+acc_test = (TP+TN)/(TP+TN+FP+FN)
+prec_test[0] = TP/(TP+FP) 
+prec_test[1] = TN/(TN+FN)
+recall_test[0] =  TP/(TP+FN)
+recall_test[1] = TN/(TN+FP)
+f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
+f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
 
 
 
