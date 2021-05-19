@@ -8,15 +8,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.model_selection import TimeSeriesSplit
-
-df=pd.read_csv("stocks_1980_2020.csv", index_col=0)
-# Computes the data frame of returns
-df_returns=df.pct_change()
-
-stock_name='AAPL'
-df_stock=df_returns[stock_name].dropna()
-
+import datetime
 
 def stock_to_train_test_cl(df,k=30):
     '''
@@ -27,8 +19,7 @@ def stock_to_train_test_cl(df,k=30):
     :return:
         X: training matrix
         y: target values
-    '''
-    
+    '''    
     X = np.zeros([df.shape[0] - k, k])
     y = np.zeros(df.shape[0]-k)
     for i in range(df.shape[0]-k):
@@ -36,8 +27,37 @@ def stock_to_train_test_cl(df,k=30):
         y[i] = df[i+k]
     return X, y
 
-X, y = stock_to_train_test_cl(df_stock, k=33)
-tscv = TimeSeriesSplit()  # FOr making time-series split for training and testing
+class RMSELoss(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.eps = eps
+        
+    def forward(self,yhat,y):
+        loss = torch.sqrt(self.mse(yhat,y) + self.eps)
+        return loss
+
+df=pd.read_csv("stocks_1980_2020.csv", header =0, index_col=0)
+df.index = pd.to_datetime(df.index)
+#df.set_index('Dates', inplace =True)
+# Computes the data frame of returns
+df_returns=df.pct_change()
+my_stocks = ['AAPL', 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE' ]
+start_date = datetime.date(1980, 12, 15)
+df_returns = df_returns.loc[start_date : ]
+a = []
+b = []
+
+for i in my_stocks:
+    df_stock = df_returns[i].fillna(0)
+    _X, _y = stock_to_train_test_cl(df_stock, k=33)
+    a.append(_X)
+    b.append(_y)
+    
+X = torch.tensor(np.stack(a), dtype = torch.float32)
+y = torch.tensor(np.stack(b), dtype = torch.float32)
+X_train, X_test = torch.split(X, 8000, dim = 1)
+y_train, y_test = torch.split(y, 8000, dim=1)
 
 #Making the lstm model
 class LSTM1(nn.Module):
@@ -51,7 +71,7 @@ class LSTM1(nn.Module):
 
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
                           num_layers=num_layers, batch_first=True) #lstm
-        self.fc_1 =  nn.Linear(hidden_size, 128) #fully connected 1
+        self.fc_1 =  nn.Linear(hidden_size, 128) #fully connected 
         self.fc = nn.Linear(128, num_classes) #fully connected last layer
 
         self.relu = nn.ReLU()
@@ -78,38 +98,52 @@ num_layers = 1 #number of stacked lstm layers
 
 num_classes = 1 #number of output classes  
 
-loss_test = [0]*5   #initializing MSEtest storing variable
-i =0 
+loss_test = 0   #initializing MSEtest storing variable
+
 
 #training the lstm model
-for train_index, test_index in tscv.split(X):
-    X_train, X_test = X[train_index], X[test_index]
-    y_train, y_test = y[train_index], y[test_index]
-    X_train_tensors_final = torch.reshape(torch.Tensor(X_train),   (torch.Tensor(X_train).shape[0], 1, torch.Tensor(X_train).shape[1]))
-    X_test_tensors_final = torch.reshape(torch.Tensor(X_test),  (torch.Tensor(X_test).shape[0], 1, torch.Tensor(X_test).shape[1])) 
-    y_train_tensors_final = torch.Tensor(y_train).view( torch.Tensor(y_train).shape[0], 1)
-    y_test_tensors_final = torch.Tensor(y_test).view(torch.Tensor(y_test).shape[0], 1)
-    lstm1 = LSTM1(num_classes, input_size, hidden_size, num_layers, X_train_tensors_final.shape[0]) #our lstm class
-    criterion = torch.nn.MSELoss()    # mean-squared error for regression
-    optimizer = torch.optim.Adam(lstm1.parameters(), lr=learning_rate)
+lstm1 = LSTM1(num_classes, input_size, hidden_size, num_layers, X_train_tensors_final.shape[0]) #our lstm class
+criterion = RMSELoss()    # root mean-squared error for regression
+optimizer = torch.optim.Adam(lstm1.parameters(), lr=learning_rate)
 
-    for epoch in range(num_epochs):
-        outputs = lstm1.forward(X_train_tensors_final) #forward pass
-        optimizer.zero_grad() #caluclate the gradient, manually setting to 0
+for epoch in range(num_epochs):
+    outputs = lstm1.forward(X_train) #forward pass
+    optimizer.zero_grad() #caluclate the gradient, manually setting to 0
  
   # obtain the loss function
-        loss = criterion(outputs, y_train_tensors_final)
+    loss = criterion(outputs, y_train)
  
-        loss.backward() #calculates the loss of the loss function
+    loss.backward() #calculates the loss of the loss function
  
-        optimizer.step() #improve from loss, i.e backprop
+    optimizer.step() #improve from loss, i.e backprop
   
   
-        if epoch % 10 == 0:                           # :if you wouuld like to see the loss progression uncomment
-            print("Epoch: %d, loss: %1.6f" % (epoch, loss.item()))
+    if epoch % 10 == 0:                           # :if you wouuld like to see the loss progression uncomment
+        print("Epoch: %d, loss: %1.6f" % (epoch, loss.item()))
             
 
-    output2 = lstm1.forward(X_test_tensors_final)
-    loss_test[i] = criterion(output2, y_test_tensors_final)
-    i +=1
+output2 = lstm1.forward(X_test)
+loss_test = criterion(output2, y_test)         # RMSEtest values   
+y_pred = torch.flatten(output2)
+y_actual = torch.flatten(y_test)
+TP = 0
+TN = 0
+FP = 0
+FN = 0
+for j, k in zip(y_pred, y_actual) :
+    if (j >= 0) & (k >= 0):
+        TP +=1
+    if (j < 0) & (k < 0): 
+        TN +=1
+    if (j >=0) & (k < 0):
+        FP +=1
+    if (j < 0) & (k >=0) :
+        FN +=1
 
+acc_test = (TP+TN)/(TP+TN+FP+FN)
+prec_test[0] = TP/(TP+FP) 
+prec_test[1] = TN/(TN+FN)
+recall_test[0] =  TP/(TP+FN)
+recall_test[1] = TN/(TN+FP)
+f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
+f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
