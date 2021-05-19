@@ -1,0 +1,30 @@
+Epoch: 0, loss: 0.00107
+Traceback (most recent call last):
+  File "DeepSigModel.py", line 116, in <module>
+    outputs = deepsignet.forward(X_train_tensors_final) #forward pass
+  File "DeepSigModel.py", line 81, in forward
+    c = self.augment2(b)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/signatory/augment.py", line 192, in forward
+    augmented_x = self.convs[0](x.transpose(1, 2))
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/conv.py", line 257, in forward
+    self.padding, self.dilation, self.groups)
+KeyboardInterrupt
+Epoch: 0, loss: 0.02009
+Traceback (most recent call last):
+  File "DeepSigModel.py", line 116, in <module>
+    outputs = deepsignet.forward(X_train_tensors_final) #forward pass
+  File "DeepSigModel.py", line 81, in forward
+    c = self.augment2(b)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/signatory/augment.py", line 192, in forward
+    augmented_x = self.convs[0](x.transpose(1, 2))
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/Users/sonam/.pyenv/versions/3.6.9/lib/python3.6/site-packages/torch/nn/modules/conv.py", line 257, in forward
+    self.padding, self.dilation, self.groups)
+KeyboardInterrupt

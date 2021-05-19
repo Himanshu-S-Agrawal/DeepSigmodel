@@ -39,7 +39,7 @@ df.index = pd.to_datetime(df.index)
 # Computes the data frame of returns
 df_returns=df.pct_change()
 my_stocks = ['AAPL' , 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE']
-start_date = datetime.date(1980, 12, 15)
+start_date = datetime.date(2000, 1, 1)
 df_returns = df_returns.loc[start_date : ]
 a = []
 b = []
@@ -49,11 +49,14 @@ for i in my_stocks:
     _X, _y = stock_to_train_test_cl(df_stock, k=33)
     a.append(_X)
     b.append(_y)
-    
+print (df_returns.shape)    
 X = torch.tensor(np.stack(a), dtype = torch.float32)
 y = torch.tensor(np.stack(b), dtype = torch.float32)
-X_train, X_test = torch.split(X, 8000, dim = 1)
-y_train, y_test = torch.split(y, 8000, dim=1)
+print (X.shape)
+X_train, X_test = torch.split(X, 4200, dim = 1)
+y_train, y_test = torch.split(y, 4200, dim=1)
+print (X_train.shape, y_train.shape)
+print(X_test.shape, y_test.shape)
 #add leakyrelu
 
 # Making the NeuralSig model
@@ -113,19 +116,20 @@ optimizer = torch.optim.Adam(signet.parameters(), lr=learning_rate)
     
 for epoch in range(num_epochs):
     outputs = signet.forward(X_train) #forward pass
+    print (outputs.shape)
     optimizer.zero_grad() #caluclate the gradient, manually setting to 0
  
   # obtain the loss function
-    loss = criterion(outputs, y_train)
+    loss = criterion(outputs, y_train.reshape(outputs.shape))
  
     loss.backward() #calculates the loss of the loss function
  
     optimizer.step() #improve from loss, i.e backprop
-    if epoch % 100 == 0:                           # :if you wouuld like to see the loss progression 
+    if epoch % 1 == 0:                           # :if you wouuld like to see the loss progression 
         print("Epoch: %d, loss: %1.5f" % (epoch, loss.item()))
 
 output2 = signet.forward(X_test)
-loss_test = criterion(output2, y_test)         # MSEtest values   
+loss_test = criterion(output2, y_test.reshape(output2.shape))         # MSEtest values   
 y_pred = torch.flatten(output2)
 y_actual = torch.flatten(y_test)
 TP = 0
@@ -149,3 +153,5 @@ recall_test[0] =  TP/(TP+FN)
 recall_test[1] = TN/(TN+FP)
 f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
 f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
+
+print (acc_test, f1_score, prec_test, prec_train)
