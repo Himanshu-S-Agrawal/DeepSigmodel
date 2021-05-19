@@ -125,19 +125,19 @@ loss_test = 0   #MSEtest storing variable
 deepsignet = DeepSigNet(in_channels, out_dimension, sig_depth) #our DeepSig class 
 criterion = RMSELoss()    # root mean-squared error for regression
 optimizer = torch.optim.Adam(deepsignet.parameters(), lr=learning_rate)
-    
-    for epoch in range(num_epochs):
-        outputs = deepsignet.forward(X_train) #forward pass
-        optimizer.zero_grad() #caluclate the gradient, manually setting to 0
+     
+for epoch in range(num_epochs):
+    outputs = deepsignet.forward(X_train) #forward pass
+    optimizer.zero_grad() #caluclate the gradient, manually setting to 0
  
   # obtain the loss function
-        loss = criterion(outputs, y_train
+    loss = criterion(outputs, y_train
  
-        loss.backward() #calculates the loss of the loss function
+    loss.backward() #calculates the loss of the loss function
  
-        optimizer.step() #improve from loss, i.e backprop
-        if epoch % 100 == 0:                           # :if you wouuld like to see the loss progression 
-            print("Epoch: %d, loss: %1.5f" % (epoch, loss.item()))
+    optimizer.step() #improve from loss, i.e backprop
+    if epoch % 100 == 0:                           # :if you wouuld like to see the loss progression 
+        print("Epoch: %d, loss: %1.5f" % (epoch, loss.item()))
             
 output2 = deepsignet.forward(X_test)
 loss_test = criterion(output2, y_test)         # MSEtest values   
