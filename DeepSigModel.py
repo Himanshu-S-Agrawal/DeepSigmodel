@@ -43,7 +43,7 @@ df.index = pd.to_datetime(df.index)
 #df.set_index('Dates', inplace =True)
 # Computes the data frame of returns
 df_returns=df.pct_change()
-my_stocks = ['AAPL' ]
+my_stocks = ['AAPL' , 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE' ]
 start_date = datetime.date(1980, 12, 15)
 df_returns = df_returns.loc[start_date : ]
 a = []
