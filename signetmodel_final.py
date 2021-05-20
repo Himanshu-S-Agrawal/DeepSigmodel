@@ -154,4 +154,4 @@ recall_test[1] = TN/(TN+FP)
 f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
 f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
 
-print (acc_test, f1_score, prec_test, prec_train)
+print (acc_test, f1_score, prec_test, recall_test)
