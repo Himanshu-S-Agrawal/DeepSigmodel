@@ -39,22 +39,22 @@ df.index = pd.to_datetime(df.index)
 # Computes the data frame of returns
 df_returns=df.pct_change()
 my_stocks = ['AAPL' , 'ABT', 'BA', 'BAC', 'BMY', 'C', 'CMCSA', 'CVX', 'DIS', 'GE']
-start_date = datetime.date(2000, 1, 1)
+start_date = datetime.date(2010, 1, 1)
 df_returns = df_returns.loc[start_date : ]
 a = []
 b = []
 
 for i in my_stocks:
     df_stock = df_returns[i].fillna(0)
-    _X, _y = stock_to_train_test_cl(df_stock, k=33)
+    _X, _y = stock_to_train_test_cl(df_stock, k=20)
     a.append(_X)
     b.append(_y)
 print (df_returns.shape)    
 X = torch.tensor(np.stack(a), dtype = torch.float32)
 y = torch.tensor(np.stack(b), dtype = torch.float32)
 print (X.shape)
-X_train, X_test = torch.split(X, 4200, dim = 1)
-y_train, y_test = torch.split(y, 4200, dim=1)
+X_train, X_test = torch.split(X, 2200, dim = 1)
+y_train, y_test = torch.split(y, 2200, dim=1)
 print (X_train.shape, y_train.shape)
 print(X_test.shape, y_test.shape)
 #add leakyrelu
@@ -96,7 +96,7 @@ class SigNet(nn.Module):
 num_epochs =  500   #change to 1000 if better fit possible 
 learning_rate = 0.001 # or 0.01 lr
 
-in_channels = 33 #number of features
+in_channels = 20 #number of features
 
 sig_depth = 3  #depth of the signature for truncation
 
@@ -116,7 +116,7 @@ optimizer = torch.optim.Adam(signet.parameters(), lr=learning_rate)
     
 for epoch in range(num_epochs):
     outputs = signet.forward(X_train) #forward pass
-    print (outputs.shape)
+    #print (outputs.shape)
     optimizer.zero_grad() #caluclate the gradient, manually setting to 0
  
   # obtain the loss function
