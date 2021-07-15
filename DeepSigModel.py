@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import signatory
 import datetime
+from sklearn.metrics import confusion_matrix
 
 def stock_to_train_test_cl(df,k=30):
     '''
@@ -45,7 +46,7 @@ b = []
 
 for i in my_stocks:
     df_stock = df_returns[i].fillna(0)
-    _X, _y = stock_to_train_test_cl(df_stock, k=20)
+    _X, _y = stock_to_train_test_cl(df_stock, k=14)
     a.append(_X)
     b.append(_y)
 print (df_returns.shape)    
@@ -90,7 +91,7 @@ class DeepSigNet(nn.Module):
         sig_channels3 = signatory.signature_channels(channels=20,
                                                      depth=sig_depth)
         self.lstm3 = nn.LSTM(input_size=sig_channels3, hidden_size=20,
-                          num_layers=2, batch_first = True, dropout = 0.1)
+                          num_layers=2, batch_first = True )
         self.linear = nn.Linear(20, out_dimension)
         self.leakyrelu = nn.LeakyReLU()
 
@@ -98,46 +99,139 @@ class DeepSigNet(nn.Module):
         # inp is a three dimensional tensor of shape (batch, stream, in_channels)
         a = self.augment1(inp)
         # a in a three dimensional tensor of shape (batch, stream, in_channels + 1)
-        b = self.signature1(a, basepoint=True)
-        # b is a three dimensional tensor of shape (batch, stream, sig_channels1)
-        #v = self.leakyrelu(b)
-        bn = nn.BatchNorm1d(b.shape[-1])
-        b = b.permute(0, 2, 1)
-        b_n = bn(b)
+        #batch normalization
+        bn = nn.BatchNorm1d(a.shape[-1])
+        a = a.permute(0, 2, 1)
+        b_n = bn(a)
         b_n = b_n.permute(0, 2, 1)
+ # b is a three dimensional tensor of shape (batch, stream, sig_channels1)
+        b = self.signature1(b_n, basepoint = True)
+        #lstm
         h_0 = torch.zeros(2, b.size(0), 20) #hidden state
         c_0 = torch.zeros(2, b.size(0), 20) #internal state
-        output1, (h_n, c_n) = self.lstm1(b_n, (h_0, c_0))
-        # c is a three dimensional tensor of shape (batch, stream, 4)
-        d = self.signature2(output1, basepoint=True)
-        # d is a three dimensional tensor of shape (batch,stream, sig_channels2)
-        bn1 = nn.BatchNorm1d(d.shape[-1])
-        d = d.permute(0, 2, 1)
-        b_n1 = bn1(d)
+        output1, (h_n, c_n) = self.lstm1(b, (h_0, c_0))
+#batch normalization
+        bn1 = nn.BatchNorm1d(output1.shape[-1])
+        output1 = output1.permute(0, 2, 1)
+        b_n1 = bn1(output1)
         b_n1 = b_n1.permute(0, 2, 1)
+
+#signature
+        d = self.signature2(b_n1, basepoint = True)
+        #lstm
         h_01 = torch.zeros(2, d.size(0), 20) #hidden state
         c_01 = torch.zeros(2, d.size(0), 20) #internal state
-        output2, (h_n1, c_n1) = self.lstm2(b_n1, (h_01, c_01))
-        f = self.signature3(output2, basepoint = True)
-        bn2 = nn.BatchNorm1d(f.shape[-1])
-        f = f.permute(0, 2, 1)
-        b_n2 = bn2(f)
+        output2, (h_n1, c_n1) = self.lstm2(d, (h_01, c_01))
+        #batch normalization
+        bn2 = nn.BatchNorm1d(output2.shape[-1])
+        output2 = output2.permute(0, 2, 1)
+        b_n2 = bn2(output2)
         b_n2 = b_n2.permute(0, 2, 1)
+        #signature
+        f = self.signature3(b_n2, basepoint = True)
+        #lstm
         h_02 = torch.zeros(2, f.size(0), 20) #hidden state
         c_02 = torch.zeros(2, f.size(0), 20) #internal state
-        output3, (h_n2, c_n2) = self.lstm3(b_n2, (h_02, c_02))
+        output3, (h_n2, c_n2) = self.lstm3(f, (h_02, c_02))
         w = self.leakyrelu(output3)
         e = self.linear(w)
         # e is a three dimensional tensor of shape (batch,stream, out_dimension)
         return e
  
 num_epochs = 200 #1000 epochs
-learning_rate = 0.0005 #0.001 lr
+learning_rate = 0.01  
 
-in_channels = 20 #number of features
-sig_depth = 3  # depth for the signature transformation
+in_channels = 14 #number of features
+sig_depth = 2 # depth for the signature transformation
 out_dimension = 1 #number of output classes  
 
+loss_test = []  #MSEtest storing variable
+acc_test =  []  #accuracy of direction
+prec_test = [0, 0]
+recall_test = [0, 0]
+f1_score = [0, 0]
+loss_train = []
+accuracy = []
+precision1 = []
+precision2 = []
+recall1 = []
+recall2 = []
+f1_score1 = []
+f1_score2 = []
+
+
+# Training the NeuralSig model
+deepsignet = DeepSigNet(in_channels, out_dimension, sig_depth) #our DeepSig class
+criterion = RMSELoss()    # mean-squared error for regression
+optimizer = torch.optim.Adam(deepsignet.parameters(), lr=learning_rate, weight_decay = 0.05, amsgrad = True)
+    
+for epoch in range(num_epochs):
+    outputs = deepsignet.forward(X_train) #forward pass
+    #print (outputs.shape)
+    optimizer.zero_grad() #caluclate the gradient, manually setting to 0
+ 
+  # obtain the loss function
+    loss = criterion(outputs, y_train.reshape(outputs.shape))
+ 
+    loss.backward() #calculates the loss of the loss function
+ 
+    optimizer.step() #improve from loss, i.e backprop
+#
+    y_pred = torch.flatten(outputs)
+    y_actual = torch.flatten(y_train)
+    y_p = np.where(y_pred >=0, 1, 0)
+    y_a = np.where(y_actual >=0, 1, 0)
+    tn, fp, fn, tp = confusion_matrix(y_a, y_p).ravel()
+    recall_train = [0,0]
+    f1_score = [0, 0]
+    acc_train = (tp+tn)/(tp+tn+fp+fn)
+    prec_train = [0, 0] 
+    if (tp !=0) or (fp!=0):
+        prec_train[0] = tp/(tp+fp) 
+    if (tn!=0) or (fn!=0):
+        prec_train[1] = tn/(tn+fn)
+    recall_train[0] =  tp/(tp+fn)
+    recall_train[1] = tn/(tn+fp)
+    if (recall_train[0] != 0) or (prec_train[0] !=0):    
+        f1_score[0] = 2*(prec_train[0]*recall_train[0]) / (prec_train[0] + recall_train[0])
+    if (recall_train[1] !=0) or (prec_train[1] != 0):    
+        f1_score[1] = 2*(prec_train[1]*recall_train[1]) / (prec_train[1] + recall_train[1])
+
+    l1 = loss.item()
+    loss_train.append(l1)
+    accuracy.append(acc_train)
+    precision1.append(prec_train[0])
+    precision2.append(prec_train[1])
+    recall1.append(recall_train[0])
+    recall2.append(recall_train[1])
+    f1_score1.append(f1_score[0])
+    f1_score2.append(f1_score[1])
+
+    if epoch % 10 == 0:   
+                                # :if you wouuld like to see the loss progression 
+        print("Epoch: %d, loss: %1.5f" % (epoch, loss.item()))
+        print("Epoch: %d, accuracy: %1.5f" % (epoch, acc_train))
+        print("precision: {}".format(prec_train))
+        print("recall: {}".format(recall_train))
+        print("f1_score: {}".format(f1_score))
+
+
+output2 = deepsignet.forward(X_test)
+loss_test = criterion(output2, y_test.reshape(output2.shape))         # MSEtest values   
+y_pred = torch.flatten(output2)
+y_actual = torch.flatten(y_test.reshape(output2.shape))
+y_p = np.where(y_pred >=0, 1, 0)
+y_a = np.where(y_actual >=0, 1, 0)
+TN, FP, FN, TP = confusion_matrix(y_a, y_p).ravel()
+acc_test = (TP+TN)/(TP+TN+FP+FN)
+prec_test[0] = TP/(TP+FP) 
+prec_test[1] = TN/(TN+FN)
+recall_test[0] =  TP/(TP+FN) 
+recall_test[1] = TN/(TN+FP)
+f1_score[0] = 2*(prec_test[0]*recall_test[0]) / (prec_test[0] + recall_test[0])
+f1_score[1] = 2*(prec_test[1]*recall_test[1]) / (prec_test[1] + recall_test[1])
+df_res = pd.DataFrame(np.column_stack([loss_train, accuracy, precision1, precision2, recall1, recall2, f1_score1, f1_score2]), columns = ['loss', 'accuracy', 'prec+', 'prec-', 'rec+', 'rec-', 'f1+', 'f1-'])
+df_res.to_csv('res_deepsignet')
 loss_test = []  #MSEtest storing variable
 acc_test =  []  #accuracy of direction
 prec_test = [0, 0]
